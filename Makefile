@@ -7,7 +7,9 @@ OBJS = $(SRCS:.c=.o)
 KERNEL = neonos.kernel
 EXEC = driver_loader
 GRUB_CFG = grub.cfg
+ISO_DIR = uniteriver
 ISO = neonos.iso
+ISO_PATH = $(ISO_DIR)/$(ISO)
 
 .PHONY: all clean iso
 
@@ -20,19 +22,19 @@ $(EXEC): $(OBJS)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 iso: $(KERNEL) $(GRUB_CFG)
-	grub-mkrescue -o $(ISO) .
+	mkdir -p $(ISO_DIR)
+	grub-mkrescue -o $(ISO_PATH) .
 
-$(KERNEL): $(OBJS)
-	$(CC) $(CFLAGS) $(LDFLAGS) $^ -o $@
+	# Copy required files into the uniteriver directory
+	mkdir -p $(ISO_DIR)/.usrkrnl $(ISO_DIR)/.syskrnl $(ISO_DIR)/.osrnl
 
-$(GRUB_CFG):
-	echo "default=0" > $(GRUB_CFG)
-	echo "timeout=3" >> $(GRUB_CFG)
-	echo "" >> $(GRUB_CFG)
-	echo "menuentry \"Neon OS\" {" >> $(GRUB_CFG)
-	echo "    set root=(hd0,1)" >> $(GRUB_CFG)
-	echo "    multiboot /boot/$(KERNEL)" >> $(GRUB_CFG)
-	echo "}" >> $(GRUB_CFG)
+	# Limit ISO size to 500MB
+	truncate -s 500M $(ISO_PATH)
+
+	# Append the uniteriver directory to the original ISO file
+	mkisofs -r -o temp.iso $(ISO_DIR)
+	dd if=temp.iso of=$(ISO_PATH) seek=$(shell stat --format="%s" $(ISO_PATH)) conv=notrunc
+	rm -f temp.iso
 
 clean:
-	rm -f $(OBJS) $(EXEC) $(KERNEL) $(GRUB_CFG) $(ISO)
+	rm -f $(OBJS) $(EXEC) $(KERNEL) $(GRUB_CFG) $(ISO_PATH)
