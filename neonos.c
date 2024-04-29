@@ -3,9 +3,18 @@
 #include <string.h>
 #include <dirent.h>
 #include <unistd.h>
+#include <sys/types.h>
+#include <sys/wait.h>
 
 #define DIRECTORY "uniteriver"
 #define MAX_FILENAME_LENGTH 256
+#define DRIVER_EXTENSIONS ".usrkrnl .syskrnl .osrnl"
+
+typedef struct {
+    const char *path;
+    pid_t pid;
+    int loaded;
+} driver_t;
 
 int is_driver_loaded(const char *driver_name) {
     // Implement logic to check if the driver is loaded
@@ -13,13 +22,37 @@ int is_driver_loaded(const char *driver_name) {
     return 0;
 }
 
-int load_driver(const char *driver_path, const char *arch) {
-    // Implement logic to load and run the driver for the specified architecture
-    // Return 1 if successful, 0 otherwise
-    printf("Driver found [%s] starting...\n", driver_path);
-    // Simulate loading and running the driver
-    sleep(1); // Simulate driver loading time
-    return 0; // Simulate failure to load
+void load_driver_internal(driver_t *driver) {
+    if (driver->loaded) {
+        printf("Driver %s is already loaded.\n", driver->path);
+        return;
+    }
+
+    printf("Driver found [%s] starting...\n", driver->path);
+    driver->pid = fork();
+
+    if (driver->pid == 0) {
+        execl(driver->path, driver->path, NULL);
+        perror("Error executing driver");
+        exit(1);
+    } else if (driver->pid > 0) {
+        driver->loaded = 1;
+        printf("[ OK ]\n");
+    } else {
+        perror("Error forking process");
+    }
+}
+
+void unload_driver_internal(driver_t *driver) {
+    if (!driver->loaded) {
+        printf("Driver %s is not loaded.\n", driver->path);
+        return;
+    }
+
+    printf("Stopping driver [%s]...\n", driver->path);
+    kill(driver->pid, SIGTERM);
+    driver->loaded = 0;
+    printf("[ OK ]\n");
 }
 
 void handle_drivers(const char *directory) {
@@ -30,28 +63,32 @@ void handle_drivers(const char *directory) {
         return;
     }
 
+    driver_t drivers[1024];
+    int num_drivers = 0;
+
     while ((entry = readdir(dir)) != NULL) {
         if (entry->d_type == DT_REG) {
             char *filename = entry->d_name;
-            if (strstr(filename, ".usrkrnl") != NULL || strstr(filename, ".syskrnl") != NULL || strstr(filename, ".osrnl") != NULL) {
+            if (strstr(filename, DRIVER_EXTENSIONS) != NULL) {
                 char driver_path[MAX_FILENAME_LENGTH];
                 snprintf(driver_path, MAX_FILENAME_LENGTH, "%s/%s", directory, filename);
-                if (!is_driver_loaded(filename)) {
-                    char arch[10];
-                    // Determine architecture based on filename or other method
-                    // Assuming here that we use 'i386' or 'x86_64' as the architecture
-                    strcpy(arch, "x86_64");
-                    if (load_driver(driver_path, arch)) {
-                        printf("[ OK ]\n");
-                    } else {
-                        printf("Error: Unable to load driver %s. Halting the CPU.\n", filename);
-                        // Halt the CPU until reboot
-                        while (1) {
-                            sleep(1); // CPU halt
-                        }
-                    }
-                }
+                drivers[num_drivers].path = driver_path;
+                drivers[num_drivers].pid = 0;
+                drivers[num_drivers].loaded = is_driver_loaded(filename);
+                num_drivers++;
             }
+        }
+    }
+
+    for (int i = 0; i < num_drivers; i++) {
+        if (!drivers[i].loaded) {
+            load_driver_internal(&drivers[i]);
+        }
+    }
+
+    for (int i = 0; i < num_drivers; i++) {
+        if (drivers[i].loaded) {
+            unload_driver_internal(&drivers[i]);
         }
     }
 
@@ -60,6 +97,6 @@ void handle_drivers(const char *directory) {
 
 int main() {
     handle_drivers(DIRECTORY);
-    printf("All drivers loaded successfully.\n");
+    printf("All drivers handled successfully.\n");
     return 0;
 }
